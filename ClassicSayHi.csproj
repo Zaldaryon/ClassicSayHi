@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <Nullable>disable</Nullable>
+    <AssemblyName>ClassicSayHi</AssemblyName>
+    <RootNamespace>ClassicSayHi</RootNamespace>
+    <VINTAGE_STORY Condition="'$(VINTAGE_STORY)' == '' And Exists('$(HOME)/.local/share/vintagestory')">$(HOME)/.local/share/vintagestory</VINTAGE_STORY>
+    <VINTAGE_STORY Condition="'$(VINTAGE_STORY)' == '' And Exists('/home/vitorpn/.local/share/vintagestory')">/home/vitorpn/.local/share/vintagestory</VINTAGE_STORY>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="VintagestoryAPI">
+      <HintPath>$(VINTAGE_STORY)/VintagestoryAPI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="VintagestoryLib">
+      <HintPath>$(VINTAGE_STORY)/VintagestoryLib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

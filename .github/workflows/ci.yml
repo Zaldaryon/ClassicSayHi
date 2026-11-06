@@ -1,0 +1,66 @@
+name: CI & Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+env:
+  VS_VERSION: "1.22.7"
+
+jobs:
+  build:
+    name: Build & Package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache Vintage Story server
+        id: cache-vs
+        uses: actions/cache@v4
+        with:
+          path: ~/vs_server
+          key: vs-server-linux-x64-${{ env.VS_VERSION }}
+
+      - name: Download Vintage Story server
+        if: steps.cache-vs.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/vs_server"
+          curl -sSL "https://cdn.vintagestory.at/gamefiles/stable/vs_server_linux-x64_${VS_VERSION}.tar.gz" | tar -xz -C "$HOME/vs_server"
+
+      - name: Resolve VINTAGE_STORY path
+        run: |
+          DLL_DIR="$(dirname "$(find "$HOME/vs_server" -name VintagestoryAPI.dll | head -1)")"
+          echo "VINTAGE_STORY=$DLL_DIR" >> "$GITHUB_ENV"
+
+      - name: Build mod
+        run: dotnet build ClassicSayHi.csproj -c Release
+
+      - name: Package mod zip
+        run: ./pack.sh
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: classicsayhi-package
+          path: releases/*.zip
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: releases/*.zip
+          generate_release_notes: true

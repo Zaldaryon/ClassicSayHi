@@ -1,0 +1,12 @@
+{
+  "type": "code",
+  "modid": "classicsayhi",
+  "name": "Classic Say Hi :)",
+  "authors": [
+    "Zaldaryon"
+  ],
+  "description": "Restores the classic 'Say hi :)' player join broadcast message from before Vintage Story 1.22 across all 34 supported languages, with runtime server commands and configuration.",
+  "version": "1.0.0",
+  "side": "Server",
+  "requiredOnClient": false
+}
