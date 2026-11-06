@@ -50,7 +50,15 @@ jobs:
         run: dotnet build ClassicSayHi.csproj -c Release
 
       - name: Package mod zip
-        run: ./pack.sh
+        run: |
+          VERSION="$(grep -oP '"version":\s*"\K[^"]+' modinfo.json)"
+          mkdir -p releases stage
+          cp bin/Release/ClassicSayHi.dll stage/
+          cp modinfo.json stage/
+          cp modicon.png stage/
+          cp README.md stage/
+          cp -r assets stage/
+          (cd stage && zip -r "../releases/classicsayhi_v${VERSION}.zip" .)
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

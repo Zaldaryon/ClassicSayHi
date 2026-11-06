@@ -103,9 +103,6 @@ Requirements:
 ```bash
 # Build the mod DLL
 dotnet build ClassicSayHi.csproj -c Release
-
-# Package the release zip
-./pack.sh
 ```
 
 ---
