@@ -36,9 +36,13 @@ Requires the `controlserver` privilege.
 | `/sayhi status [lang]` | Displays status and preview for the active or specified language |
 | `/sayhi set <format>` | Sets the default English message and global fallback (must contain `{0}`) |
 | `/sayhi set <lang> <format>` | Sets a message for a specific language (e.g. `pt-br`, `de`, `fr`, `ru`) |
+| `/sayhi setlang <lang> <format>` | Sets a message for a specific language directly |
 | `/sayhi reset` | Resets all formats back to the default localized messages |
 | `/sayhi reset <lang>` | Resets a specific language back to fallback |
 | `/sayhi reload` | Reloads configuration from `ModConfig/classicsayhi.json` |
+| `/sayhi enable` | Enables Classic Say Hi join messages |
+| `/sayhi disable` | Disables mod and reverts to vanilla 1.22 join message |
+| `/sayhi toggle` | Toggles mod on or off |
 
 ### Command Examples
 
@@ -48,6 +52,8 @@ Requires the `controlserver` privilege.
 
 # Set a custom message for Portuguese players
 /sayhi set pt-br {0} entrou no servidor. Diga olá :)
+# or using setlang:
+/sayhi setlang pt-br {0} entrou no servidor. Diga olá :)
 
 # Check current configuration and preview
 /sayhi status
@@ -57,6 +63,9 @@ Requires the `controlserver` privilege.
 
 # Reset all languages back to original localized strings
 /sayhi reset
+
+# Temporarily disable mod without removing it
+/sayhi disable
 ```
 
 ---
@@ -68,21 +77,21 @@ The configuration file is created automatically on first run:
 ```json
 {
   "Enabled": true,
-  "DefaultFormat": null,
+  "DefaultFormat": "{0} joined. Say hi :)",
   "FormatsByLanguage": {}
 }
 ```
 
-- When `DefaultFormat` is `null`, the mod uses the authentic localized message for the server's configured language.
-- When `DefaultFormat` contains a string, that template overrides English and serves as fallback for any language without a specific override.
-- `FormatsByLanguage` stores per-language overrides configured via `/sayhi set <lang> <format>`.
+- `Enabled`: When `true`, classic join greetings are active. When `false`, the server outputs vanilla 1.22 messages (`"{0} joined"`).
+- `DefaultFormat`: Defaults to `"{0} joined. Say hi :)"`. When left at default, each of the 34 supported game languages uses its authentic pre-1.22 localized translation. When customized with a different message, that message overrides English and serves as the fallback for any language without a specific override.
+- `FormatsByLanguage`: Stores per-language overrides configured via `/sayhi set <lang> <format>` or `/sayhi setlang <lang> <format>`.
 
 ---
 
 ## Installation
 
 ### Dedicated Server
-1. Download `classicsayhi_v1.0.0.zip` from [Releases](https://github.com/Zaldaryon/classicsayhi/releases).
+1. Download `classicsayhi_v1.0.1.zip` from [Releases](https://github.com/Zaldaryon/ClassicSayHi/releases).
 2. Place the `.zip` file into your server's `Mods/` folder.
 3. Restart the server.
 

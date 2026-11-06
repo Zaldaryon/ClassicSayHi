@@ -8,13 +8,16 @@ namespace ClassicSayHi;
 
 public class ClassicSayHiConfig
 {
+    public const string DefaultGreeting = "{0} joined. Say hi :)";
+
     public bool Enabled { get; set; } = true;
-    public string DefaultFormat { get; set; } = null;
+    public string DefaultFormat { get; set; } = DefaultGreeting;
     public Dictionary<string, string> FormatsByLanguage { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public class ClassicSayHiModSystem : ModSystem
 {
+    private ICoreAPI api;
     private ICoreServerAPI sapi;
     private ClassicSayHiConfig config;
     private const string ConfigFileName = "classicsayhi.json";
@@ -22,10 +25,15 @@ public class ClassicSayHiModSystem : ModSystem
 
     public override bool ShouldLoad(EnumAppSide side) => side == EnumAppSide.Server;
 
+    public override void Start(ICoreAPI api)
+    {
+        this.api = api;
+        LoadConfig(api);
+    }
+
     public override void StartServerSide(ICoreServerAPI api)
     {
         sapi = api;
-        LoadConfig();
 
         var cmd = api.ChatCommands.Create("sayhi")
             .RequiresPrivilege(Privilege.controlserver)
@@ -44,6 +52,12 @@ public class ClassicSayHiModSystem : ModSystem
             .HandleWith(OnCmdSet)
             .EndSubCommand();
 
+        cmd.BeginSubCommand("setlang")
+            .WithDescription("Set join message format for a specific language: /sayhi setlang <lang> <format>")
+            .WithArgs(api.ChatCommands.Parsers.Word("language"), api.ChatCommands.Parsers.All("format"))
+            .HandleWith(OnCmdSetLang)
+            .EndSubCommand();
+
         cmd.BeginSubCommand("reset")
             .WithDescription("Reset format to default. Optional language: /sayhi reset [lang]")
             .WithArgs(api.ChatCommands.Parsers.OptionalWord("language"))
@@ -53,6 +67,21 @@ public class ClassicSayHiModSystem : ModSystem
         cmd.BeginSubCommand("reload")
             .WithDescription("Reload configuration from disk")
             .HandleWith(OnCmdReload)
+            .EndSubCommand();
+
+        cmd.BeginSubCommand("enable")
+            .WithDescription("Enable Classic Say Hi join messages")
+            .HandleWith(OnCmdEnable)
+            .EndSubCommand();
+
+        cmd.BeginSubCommand("disable")
+            .WithDescription("Disable Classic Say Hi (restores vanilla 1.22 join message)")
+            .HandleWith(OnCmdDisable)
+            .EndSubCommand();
+
+        cmd.BeginSubCommand("toggle")
+            .WithDescription("Toggle Classic Say Hi on/off")
+            .HandleWith(OnCmdToggle)
             .EndSubCommand();
     }
 
@@ -68,60 +97,120 @@ public class ClassicSayHiModSystem : ModSystem
         ApplyConfigToLang();
     }
 
-    private void LoadConfig()
+    private void LoadConfig(ICoreAPI coreApi)
     {
         try
         {
-            config = sapi.LoadModConfig<ClassicSayHiConfig>(ConfigFileName) ?? new ClassicSayHiConfig();
-            config.FormatsByLanguage ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var loaded = coreApi.LoadModConfig<ClassicSayHiConfig>(ConfigFileName);
+            if (loaded != null)
+            {
+                config = loaded;
+                config.FormatsByLanguage ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (string.IsNullOrWhiteSpace(config.DefaultFormat))
+                {
+                    config.DefaultFormat = ClassicSayHiConfig.DefaultGreeting;
+                }
+                return;
+            }
         }
         catch (Exception ex)
         {
-            sapi.Logger.Warning($"[ClassicSayHi] Failed loading {ConfigFileName}: {ex.Message}. Using defaults.");
-            config = new ClassicSayHiConfig();
+            coreApi.Logger.Warning($"[ClassicSayHi] Failed loading {ConfigFileName}: {ex.Message}. Preserving existing configuration.");
+            if (config != null) return;
         }
+
+        config = new ClassicSayHiConfig();
         SaveConfig();
     }
 
     private void SaveConfig()
     {
+        var targetApi = sapi ?? (api as ICoreServerAPI);
+        if (targetApi == null) return;
+
         try
         {
-            sapi.StoreModConfig(config, ConfigFileName);
+            targetApi.StoreModConfig(config, ConfigFileName);
         }
         catch (Exception ex)
         {
-            sapi.Logger.Warning($"[ClassicSayHi] Failed saving {ConfigFileName}: {ex.Message}");
+            targetApi.Logger.Warning($"[ClassicSayHi] Failed saving {ConfigFileName}: {ex.Message}");
         }
     }
 
     private void ApplyConfigToLang()
     {
-        if (!config.Enabled) return;
+        if (config == null) return;
+
+        bool hasCustomDefault = !string.IsNullOrWhiteSpace(config.DefaultFormat)
+            && !string.Equals(config.DefaultFormat, ClassicSayHiConfig.DefaultGreeting, StringComparison.Ordinal);
 
         foreach (var (code, service) in Lang.AvailableLanguages)
         {
             string formatToUse;
-            if (config.FormatsByLanguage.TryGetValue(code, out var specific) && !string.IsNullOrEmpty(specific))
+
+            if (!config.Enabled)
+            {
+                formatToUse = "{0} joined";
+            }
+            else if (config.FormatsByLanguage.TryGetValue(code, out var specific) && !string.IsNullOrWhiteSpace(specific))
             {
                 formatToUse = specific;
             }
-            else if (!string.IsNullOrEmpty(config.DefaultFormat))
+            else if (hasCustomDefault)
             {
                 formatToUse = config.DefaultFormat;
             }
-            else if (originalTranslations.TryGetValue(code, out var orig))
+            else if (originalTranslations.TryGetValue(code, out var orig) && !string.IsNullOrWhiteSpace(orig))
             {
                 formatToUse = orig;
             }
             else
             {
-                continue;
+                formatToUse = config.DefaultFormat ?? ClassicSayHiConfig.DefaultGreeting;
             }
 
-            service.GetAllEntries()["game:player-joined"] = formatToUse;
-            service.GetAllEntries()["player-joined"] = formatToUse;
+            var entries = service.GetAllEntries();
+            lock (entries)
+            {
+                entries["game:player-joined"] = formatToUse;
+                entries["player-joined"] = formatToUse;
+            }
         }
+    }
+
+    private static bool TryValidateFormat(string candidate, out string error)
+    {
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            error = "Format cannot be empty.";
+            return false;
+        }
+
+        if (!candidate.Contains("{0}"))
+        {
+            error = "Format must contain {0} placeholder for player name. Example: {0} joined. Say hi :)";
+            return false;
+        }
+
+        if (candidate.Contains("{p"))
+        {
+            error = "Plural format syntax ({p...}) is not permitted in join broadcast messages.";
+            return false;
+        }
+
+        try
+        {
+            _ = string.Format(candidate, "TestPlayer");
+        }
+        catch (FormatException ex)
+        {
+            error = $"Invalid format string: {ex.Message}";
+            return false;
+        }
+
+        error = null;
+        return true;
     }
 
     private static bool IsLanguageCode(string token)
@@ -134,11 +223,16 @@ public class ClassicSayHiModSystem : ModSystem
     private TextCommandResult OnCmdStatus(TextCommandCallingArgs args)
     {
         string requestedLang = (args.Parsers.Count > 0 && !args.Parsers[0].IsMissing) ? ((string)args[0])?.ToLowerInvariant() : null;
-        string serverLang = sapi.World.Config.GetString("serverLanguage", "en");
+        string serverLang = Lang.CurrentLocale ?? "en";
         string langToCheck = requestedLang ?? serverLang;
 
+        if (requestedLang != null && !Lang.AvailableLanguages.ContainsKey(requestedLang))
+        {
+            return TextCommandResult.Error($"Language '{requestedLang}' is not registered in Vintage Story.");
+        }
+
         string current = Lang.GetL(langToCheck, "player-joined", "Player");
-        string defFmt = config.DefaultFormat ?? "(Default localized pre-1.22)";
+        string defFmt = config.DefaultFormat ?? ClassicSayHiConfig.DefaultGreeting;
         string specFmt = config.FormatsByLanguage.TryGetValue(langToCheck, out var s) ? s : "(Fallback to default)";
 
         string overrides = config.FormatsByLanguage.Count > 0
@@ -175,6 +269,10 @@ public class ClassicSayHiModSystem : ModSystem
                 targetLang = firstWord.ToLowerInvariant();
                 format = raw.Substring(spaceIdx + 1).Trim();
             }
+            else if (firstWord.Contains('-') || firstWord.Contains('_'))
+            {
+                return TextCommandResult.Error($"Unknown language code '{firstWord}'. Check available language codes in /sayhi status or omit the prefix to set the default format.");
+            }
             else
             {
                 format = raw;
@@ -182,12 +280,16 @@ public class ClassicSayHiModSystem : ModSystem
         }
         else
         {
+            if (IsLanguageCode(raw))
+            {
+                return TextCommandResult.Error($"Please provide a format after the language code. Example: /sayhi set {raw} {{0}} joined. Welcome :)");
+            }
             format = raw;
         }
 
-        if (!format.Contains("{0}"))
+        if (!TryValidateFormat(format, out var formatError))
         {
-            return TextCommandResult.Error("Format must contain {0} placeholder for player name. Example: /sayhi set {0} joined. Welcome :)");
+            return TextCommandResult.Error(formatError);
         }
 
         config.Enabled = true;
@@ -196,17 +298,49 @@ public class ClassicSayHiModSystem : ModSystem
         {
             config.DefaultFormat = format;
             config.FormatsByLanguage["en"] = format;
-            SaveConfig();
             ApplyConfigToLang();
+            SaveConfig();
             return TextCommandResult.Success($"[ClassicSayHi] Default (English & fallback) join message updated:\n  \"{format}\"\nPreview ({targetLang ?? "en"}): {Lang.GetL(targetLang ?? "en", "player-joined", "Player")}");
         }
         else
         {
             config.FormatsByLanguage[targetLang] = format;
-            SaveConfig();
             ApplyConfigToLang();
+            SaveConfig();
             return TextCommandResult.Success($"[ClassicSayHi] Join message updated for [{targetLang}]:\n  \"{format}\"\nPreview: {Lang.GetL(targetLang, "player-joined", "Player")}");
         }
+    }
+
+    private TextCommandResult OnCmdSetLang(TextCommandCallingArgs args)
+    {
+        string lang = ((string)args[0])?.Trim().ToLowerInvariant();
+        string format = ((string)args[1])?.Trim();
+
+        if (string.IsNullOrEmpty(lang) || !Lang.AvailableLanguages.ContainsKey(lang))
+        {
+            return TextCommandResult.Error($"Language '{lang}' is not registered in Vintage Story.");
+        }
+
+        if (!TryValidateFormat(format, out var formatError))
+        {
+            return TextCommandResult.Error(formatError);
+        }
+
+        config.Enabled = true;
+
+        if (lang == "en")
+        {
+            config.DefaultFormat = format;
+            config.FormatsByLanguage["en"] = format;
+        }
+        else
+        {
+            config.FormatsByLanguage[lang] = format;
+        }
+
+        ApplyConfigToLang();
+        SaveConfig();
+        return TextCommandResult.Success($"[ClassicSayHi] Join message updated for [{lang}]:\n  \"{format}\"\nPreview: {Lang.GetL(lang, "player-joined", "Player")}");
     }
 
     private TextCommandResult OnCmdReset(TextCommandCallingArgs args)
@@ -215,17 +349,22 @@ public class ClassicSayHiModSystem : ModSystem
 
         if (string.IsNullOrEmpty(lang))
         {
-            config.DefaultFormat = null;
+            config.DefaultFormat = ClassicSayHiConfig.DefaultGreeting;
             config.FormatsByLanguage.Clear();
             config.Enabled = true;
-            SaveConfig();
             ApplyConfigToLang();
+            SaveConfig();
             return TextCommandResult.Success("[ClassicSayHi] All formats reset to default localized messages.");
+        }
+
+        if (!Lang.AvailableLanguages.ContainsKey(lang))
+        {
+            return TextCommandResult.Error($"Language '{lang}' is not registered in Vintage Story.");
         }
 
         if (lang == "en")
         {
-            config.DefaultFormat = null;
+            config.DefaultFormat = ClassicSayHiConfig.DefaultGreeting;
             config.FormatsByLanguage.Remove("en");
         }
         else
@@ -233,15 +372,39 @@ public class ClassicSayHiModSystem : ModSystem
             config.FormatsByLanguage.Remove(lang);
         }
 
-        SaveConfig();
         ApplyConfigToLang();
+        SaveConfig();
         return TextCommandResult.Success($"[ClassicSayHi] Format for [{lang}] reset. Preview: {Lang.GetL(lang, "player-joined", "Player")}");
     }
 
     private TextCommandResult OnCmdReload(TextCommandCallingArgs args)
     {
-        LoadConfig();
+        LoadConfig(sapi);
         ApplyConfigToLang();
         return TextCommandResult.Success("[ClassicSayHi] Config reloaded and applied.");
+    }
+
+    private TextCommandResult OnCmdEnable(TextCommandCallingArgs args)
+    {
+        config.Enabled = true;
+        ApplyConfigToLang();
+        SaveConfig();
+        return TextCommandResult.Success("[ClassicSayHi] Mod enabled. Classic join messages active.");
+    }
+
+    private TextCommandResult OnCmdDisable(TextCommandCallingArgs args)
+    {
+        config.Enabled = false;
+        ApplyConfigToLang();
+        SaveConfig();
+        return TextCommandResult.Success("[ClassicSayHi] Mod disabled. Reverted to vanilla 1.22 join messages.");
+    }
+
+    private TextCommandResult OnCmdToggle(TextCommandCallingArgs args)
+    {
+        config.Enabled = !config.Enabled;
+        ApplyConfigToLang();
+        SaveConfig();
+        return TextCommandResult.Success($"[ClassicSayHi] Mod is now {(config.Enabled ? "enabled" : "disabled")}.");
     }
 }
